@@ -17,6 +17,8 @@ const {
   CONTACT_TO_EMAIL,
   CALLMEBOT_PHONE,
   CALLMEBOT_APIKEY,
+  TELEGRAM_BOT_TOKEN,
+  TELEGRAM_CHAT_ID,
 } = process.env
 
 const isEmail = v => typeof v === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)
@@ -97,11 +99,12 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Could not save your message. Please try again.' })
   }
 
-  // 2 + 3. Send the email and WhatsApp side by side; don't let them hold up
-  // the response, and don't let one failing take down the other.
+  // Fire off the email, WhatsApp, and Telegram pings side by side. None of them
+  // hold up the response, and one failing won't drag down the others.
   await Promise.allSettled([
     sendEmail({ name, email, phone, subject, message }),
     sendWhatsApp({ name, email, phone, subject, message }),
+    sendTelegram({ name, email, phone, subject, message }),
   ])
 
   return res.status(200).json({ ok: true })
@@ -151,6 +154,26 @@ async function sendWhatsApp({ name, email, phone, subject, message }) {
     `&apikey=${encodeURIComponent(CALLMEBOT_APIKEY)}`
   const r = await fetch(url)
   if (!r.ok) console.error('CallMeBot failed:', r.status, await r.text())
+}
+
+async function sendTelegram({ name, email, phone, subject, message }) {
+  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return
+  const text =
+    `📨 New portfolio message\n` +
+    `Name: ${name}\n` +
+    `Email: ${email}\n` +
+    `Phone: ${phone || 'Not provided'}\n` +
+    `Subject: ${subject}\n\n` +
+    `${message}`
+  const r = await fetch(
+    `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, text }),
+    },
+  )
+  if (!r.ok) console.error('Telegram failed:', r.status, await r.text())
 }
 
 // Keep stray < > & from breaking (or injecting into) the email HTML.
